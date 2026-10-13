@@ -1,0 +1,12 @@
+{
+  "policy_version": "1.0",
+  "recommendations": {
+    "routine_review": {"min": 0, "max": 29},
+    "enhanced_review": {"min": 30, "max": 59},
+    "urgent_review": {"min": 60, "max": 79},
+    "specialist_review": {"min": 80, "max": 100}
+  },
+  "elevated_fraud_threshold": 0.7,
+  "elevated_anomaly_threshold": 0.8,
+  "high_amount_pctile": 90
+}
