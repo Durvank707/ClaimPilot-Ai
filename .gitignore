@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables
+.env
+.env.*
+
+# But keep the example
+!.env.example
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Data
+data/raw/
+data/processed/
+data/external/
+
+# ML models
+models/
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.onnx
+
+# OS
+.DS_Store
+Thumbs.db
