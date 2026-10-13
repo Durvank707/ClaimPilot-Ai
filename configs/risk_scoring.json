@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "weights": {
+    "fraud": 0.5,
+    "anomaly": 0.25,
+    "severity": 0.25
+  },
+  "risk_thresholds": {
+    "low": 30,
+    "medium": 60,
+    "high": 80
+  }
+}
