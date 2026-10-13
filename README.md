@@ -42,7 +42,7 @@ ClaimPilot-AI/
 | **Module 5** | ✅ Complete | Claim Severity/Amount Prediction |
 | **Module 6** | ✅ Complete | Anomaly Detection |
 | **Module 7** | ✅ Complete | Risk Scoring |
-| **Module 8** | 📋 Planned | Explainable AI (XAI) |
+| **Module 8** | ✅ Complete | Explainable AI |
 | **Module 9** | 📋 Planned | Decision/Recommendation Engine |
 | **Module 10** | 📋 Planned | Backend API (FastAPI) |
 | **Module 11** | 📋 Planned | Database (PostgreSQL/Supabase) |
