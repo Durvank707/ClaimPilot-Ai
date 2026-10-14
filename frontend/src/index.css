@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * ClaimPilot AI — design tokens.
+ * Colors / radii / shadows are defined in tailwind.config.js so they are
+ * available as utility classes. The variables below document shared values
+ * that are awkward to express as utilities (focus ring, motion).
+ */
+:root {
+  --cp-focus-ring: 53 99 245;
+  --cp-motion-fast: 120ms;
+  --cp-motion-base: 180ms;
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-800 antialiased;
+    margin: 0;
+    min-height: 100vh;
+  }
+
+  /* Visible, consistent keyboard focus for every interactive element. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent-500 ring-offset-2 ring-offset-white;
+  }
+
+  ::selection {
+    @apply bg-accent-100 text-navy-900;
+  }
+}
+
+@layer components {
+  /* Shared panel surface used by Card and the layout regions. */
+  .cp-surface {
+    @apply rounded-xl border border-ink-200 bg-white shadow-card;
+  }
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
