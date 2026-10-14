@@ -44,7 +44,7 @@ ClaimPilot-AI/
 | **Module 7** | ✅ Complete | Risk Scoring |
 | **Module 8** | ✅ Complete | Explainable AI |
 | **Module 9** | ✅ Complete | Decision Engine |
-| **Module 10** | 📋 Planned | Backend API (FastAPI) |
+| **Module 10** | ✅ Complete | Backend API |
 | **Module 11** | 📋 Planned | Database (PostgreSQL/Supabase) |
 | **Module 12** | 📋 Planned | Frontend Dashboard |
 | **Module 13** | 📋 Planned | Authentication & Roles |
