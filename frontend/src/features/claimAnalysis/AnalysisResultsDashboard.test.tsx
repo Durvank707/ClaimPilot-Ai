@@ -35,6 +35,8 @@ const baseResponse: ClaimAnalysisResponse = {
     policy_version: '1.0',
     human_decision_required: true,
   },
+  analysis_id: 'AN-1',
+  persisted: true,
 }
 
 const emptyResponse: ClaimAnalysisResponse = {
@@ -45,6 +47,8 @@ const emptyResponse: ClaimAnalysisResponse = {
   risk: {},
   explanation: {},
   decision: {},
+  analysis_id: null,
+  persisted: false,
 }
 
 function renderDashboard(response = baseResponse, onStartAnother = () => {}) {
@@ -63,6 +67,21 @@ describe('AnalysisResultsDashboard', () => {
     expect(screen.getByText('Claim ID: POLICY-42')).toBeDefined()
     // Risk level is communicated by text, not colour alone.
     expect(screen.getAllByText(/MEDIUM/).length).toBeGreaterThan(0)
+  })
+
+  it('renders unchanged with the preserved persistence metadata', () => {
+    // The dashboard does not act on analysis_id/persisted yet; these fields must
+    // not alter the existing rendering or fabricate persistence messaging.
+    renderDashboard({
+      ...baseResponse,
+      analysis_id: 'AN-123',
+      persisted: false,
+    })
+    expect(screen.getByText('Claim Analysis')).toBeDefined()
+    // The honest "in memory only" disclaimer is still shown.
+    expect(
+      screen.getByText(/does not confirm that the claim was saved/i),
+    ).toBeDefined()
   })
 
   it('renders each real metric', () => {
@@ -165,6 +184,8 @@ describe('AnalysisResultsDashboard', () => {
       risk: { score: 'x' as unknown as number, level: '' },
       explanation: {},
       decision: { human_decision_required: false },
+      analysis_id: null,
+      persisted: false,
     }
     renderDashboard(malformed)
     expect(screen.getAllByText('Not returned').length).toBeGreaterThan(0)

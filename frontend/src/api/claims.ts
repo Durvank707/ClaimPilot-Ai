@@ -11,10 +11,10 @@ import { ApiError, describeApiError, isApiError } from './errors'
  * values (`model_dump(exclude_none=True)`).
  *
  * Response: validated through `response_model=ClaimResponse`, which declares
- * exactly the fields below. NOTE: the route adds `analysis_id` to its result,
- * but `ClaimResponse` has no such field, so Pydantic **strips it** before the
- * response is sent. `analysis_id` is therefore never returned by this API
- * version. `claim_id` mirrors the submitted `policy_id` (or `null`).
+ * exactly the fields below. The route also returns the persistence metadata
+ * `analysis_id` (the stored analysis UUID, or `null` when persistence did not
+ * happen) and `persisted` (whether the claim and analysis were committed
+ * together). `claim_id` mirrors the submitted `policy_id` (or `null`).
  */
 export interface ClaimRequest {
   policy_id?: string
@@ -49,6 +49,17 @@ export interface ClaimAnalysisResponse {
   risk: Record<string, unknown>
   explanation: Record<string, unknown>
   decision: Record<string, unknown>
+  /**
+   * UUID of the stored analysis record, or `null` when persistence failed.
+   * Never used on its own to infer that data was saved.
+   */
+  analysis_id: string | null
+  /**
+   * The backend's own statement of whether the claim and analysis were
+   * committed together. A successful ML analysis can still be `false`; this is
+   * never inferred from `analysis_id`.
+   */
+  persisted: boolean
 }
 
 /**
@@ -71,6 +82,27 @@ const REQUIRED_SECTIONS = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Accept a string, or `null`/`undefined` (preserved as null); reject the rest. */
+function readNullableString(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string') {
+    throw new ApiError('parse', `Analysis response had an invalid ${field}`)
+  }
+  return value
+}
+
+/**
+ * Accept a boolean. The flag is authoritative, so anything else — including a
+ * missing value — is a malformed response and raises a typed parse error rather
+ * than being coerced into a persistence claim.
+ */
+function readBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new ApiError('parse', `Analysis response had an invalid ${field}`)
+  }
+  return value
 }
 
 /** Validate a raw analyze payload before trusting it. */
@@ -106,6 +138,8 @@ export function parseClaimAnalysisResponse(
     risk: value.risk as Record<string, unknown>,
     explanation: value.explanation as Record<string, unknown>,
     decision: value.decision as Record<string, unknown>,
+    analysis_id: readNullableString(value.analysis_id, 'analysis_id'),
+    persisted: readBoolean(value.persisted, 'persisted flag'),
   }
 }
 

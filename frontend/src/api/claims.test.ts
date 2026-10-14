@@ -33,6 +33,8 @@ function validPayload(): Record<string, unknown> {
     risk: { score: 55, level: 'HIGH' },
     explanation: { summary: 'example' },
     decision: { recommendation: 'review' },
+    analysis_id: 'AN-1',
+    persisted: true,
   }
 }
 
@@ -45,6 +47,17 @@ const REQUEST: ClaimRequest = {
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+/** Parse a value and return the `ApiError.kind`; fails if no error is thrown. */
+function parseErrorKind(value: unknown): string {
+  try {
+    parseClaimAnalysisResponse(value)
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApiError)
+    return (error as ApiError).kind
+  }
+  throw new Error('expected parseClaimAnalysisResponse to reject')
+}
 
 describe('submitClaim', () => {
   it('POSTs the claim as JSON to the analyze endpoint', async () => {
@@ -130,6 +143,22 @@ describe('submitClaim', () => {
 })
 
 describe('parseClaimAnalysisResponse', () => {
+  it('preserves a string analysis_id and persisted: true', () => {
+    const parsed = parseClaimAnalysisResponse(validPayload())
+    expect(parsed.analysis_id).toBe('AN-1')
+    expect(parsed.persisted).toBe(true)
+  })
+
+  it('preserves a null analysis_id and persisted: false', () => {
+    const parsed = parseClaimAnalysisResponse({
+      ...validPayload(),
+      analysis_id: null,
+      persisted: false,
+    })
+    expect(parsed.analysis_id).toBeNull()
+    expect(parsed.persisted).toBe(false)
+  })
+
   it('keeps a null claim_id when the backend omits it', () => {
     const parsed = parseClaimAnalysisResponse({
       ...validPayload(),
@@ -138,9 +167,40 @@ describe('parseClaimAnalysisResponse', () => {
     expect(parsed.claim_id).toBeNull()
   })
 
-  it('never invents an analysis_id (the API does not return one)', () => {
+  it('never infers persistence from the presence of an analysis_id', () => {
+    // A malformed/edge response that carries an id but reports not-persisted
+    // must still report the backend's own persisted flag.
+    const parsed = parseClaimAnalysisResponse({
+      ...validPayload(),
+      analysis_id: 'AN-9',
+      persisted: false,
+    })
+    expect(parsed.persisted).toBe(false)
+  })
+
+  it('keeps all existing sections intact', () => {
     const parsed = parseClaimAnalysisResponse(validPayload())
-    expect('analysis_id' in parsed).toBe(false)
+    expect(parsed.claim_id).toBe('POLICY-42')
+    expect(parsed.fraud).toEqual({ probability: 0.12 })
+    expect(parsed.severity).toEqual({ predicted_claim_amount: 12000 })
+    expect(parsed.anomaly).toEqual({ score: 0.31 })
+    expect(parsed.risk).toEqual({ score: 55, level: 'HIGH' })
+    expect(parsed.explanation).toEqual({ summary: 'example' })
+    expect(parsed.decision).toEqual({ recommendation: 'review' })
+  })
+
+  it('rejects an invalid analysis_id type with a parse error', () => {
+    expect(parseErrorKind({ ...validPayload(), analysis_id: 42 })).toBe('parse')
+  })
+
+  it('rejects an invalid persisted type with a parse error', () => {
+    expect(parseErrorKind({ ...validPayload(), persisted: 'true' })).toBe('parse')
+  })
+
+  it('rejects a missing persisted flag rather than assuming persistence', () => {
+    const payload = validPayload()
+    delete payload.persisted
+    expect(parseErrorKind(payload)).toBe('parse')
   })
 })
 

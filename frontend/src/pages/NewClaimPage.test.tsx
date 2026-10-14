@@ -44,6 +44,8 @@ function analysisPayload(overrides: Record<string, unknown> = {}) {
       policy_version: '1.0',
       human_decision_required: true,
     },
+    analysis_id: 'AN-1',
+    persisted: true,
     ...overrides,
   }
 }
