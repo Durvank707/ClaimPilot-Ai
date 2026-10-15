@@ -15,6 +15,7 @@ import { Button } from '../components/ui/Button'
 import { FormField } from '../components/ui/FormField'
 import { Input } from '../components/ui/Input'
 import { HistoryIcon, LookupIcon } from '../components/icons'
+import { SavedAnalysisDetailsPage } from './SavedAnalysisDetailsPage'
 import {
   formatCurrency,
   formatDate,
@@ -138,7 +139,17 @@ function Spinner() {
 }
 
 /** One history row. Only the summary fields returned by the endpoint. */
-function HistoryRow({ item }: { item: AnalysisHistoryItem }) {
+function HistoryRow({
+  item,
+  onOpenAnalysis,
+}: {
+  item: AnalysisHistoryItem
+  onOpenAnalysis?: (analysisId: string) => void
+}) {
+  const analysisId =
+    typeof item.analysis_id === 'string' ? item.analysis_id.trim() : ''
+  const canOpen = analysisId !== '' && onOpenAnalysis !== undefined
+
   return (
     <tr className="border-b border-ink-100 align-top">
       <td className="px-3 py-3">
@@ -179,11 +190,34 @@ function HistoryRow({ item }: { item: AnalysisHistoryItem }) {
           <MissingValue />
         )}
       </td>
+      <td className="px-3 py-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canOpen}
+          aria-label={
+            analysisId !== ''
+              ? `View details for analysis ${analysisId}`
+              : 'View details unavailable'
+          }
+          onClick={() => {
+            if (canOpen) onOpenAnalysis?.(analysisId)
+          }}
+        >
+          View details
+        </Button>
+      </td>
     </tr>
   )
 }
 
-function HistoryTable({ page }: { page: AnalysisHistoryPage }) {
+function HistoryTable({
+  page,
+  onOpenAnalysis,
+}: {
+  page: AnalysisHistoryPage
+  onOpenAnalysis?: (analysisId: string) => void
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[860px] text-left text-sm">
@@ -216,11 +250,18 @@ function HistoryTable({ page }: { page: AnalysisHistoryPage }) {
             <th scope="col" className="px-3 py-2 font-medium">
               Review recommendation
             </th>
+            <th scope="col" className="px-3 py-2 font-medium">
+              Details
+            </th>
           </tr>
         </thead>
         <tbody>
           {page.items.map((item, index) => (
-            <HistoryRow key={item.analysis_id ?? index} item={item} />
+            <HistoryRow
+              key={item.analysis_id ?? index}
+              item={item}
+              onOpenAnalysis={onOpenAnalysis}
+            />
           ))}
         </tbody>
       </table>
@@ -232,10 +273,12 @@ function HistoryCard({
   page,
   claimId,
   onPage,
+  onOpenAnalysis,
 }: {
   page: AnalysisHistoryPage
   claimId: string
   onPage: (offset: number) => void
+  onOpenAnalysis?: (analysisId: string) => void
 }) {
   const limit = page.limit || PAGE_SIZE
   const offset = page.offset
@@ -259,7 +302,7 @@ function HistoryCard({
         </Badge>
       </CardHeader>
 
-      <HistoryTable page={page} />
+      <HistoryTable page={page} onOpenAnalysis={onOpenAnalysis} />
 
       <div className="border-t border-ink-200 px-5 py-3">
         <p className="text-xs text-ink-500">
@@ -307,8 +350,30 @@ function HistoryCard({
  * so an out-of-order response — an older claim search or an older page — can
  * never overwrite a newer result. Starting a new search clears the previous
  * results so they are not mistaken for the new claim's history.
+ *
+ * The page is also the contextual home of the Saved Analysis Details view: when
+ * the caller passes a `selectedAnalysisId`, the details are rendered in place of
+ * the list. The list component stays mounted, so its search results and
+ * pagination survive the round-trip to an analysis and back.
  */
-export function ClaimsHistoryPage() {
+export interface ClaimsHistoryPageProps {
+  /**
+   * When a non-empty analysis id is supplied, the saved analysis details for
+   * that id are shown instead of the history list. Null/blank means "show the
+   * list". The id is used exactly as given; a claim id is never substituted.
+   */
+  selectedAnalysisId?: string | null
+  /** Open the details for a row's analysis id. */
+  onOpenAnalysis?: (analysisId: string) => void
+  /** Leave the details view and return to the history list. */
+  onBack?: () => void
+}
+
+export function ClaimsHistoryPage({
+  selectedAnalysisId = null,
+  onOpenAnalysis,
+  onBack,
+}: ClaimsHistoryPageProps = {}) {
   const [query, setQuery] = useState('')
   const [validationError, setValidationError] = useState<string | undefined>(
     undefined,
@@ -322,6 +387,19 @@ export function ClaimsHistoryPage() {
     null,
   )
   const requestSeq = useRef(0)
+
+  // Contextual drill-down. Rendered here (rather than unmounting the list) so
+  // the claim's search results and pagination are preserved when the user
+  // returns. Navigation state itself is owned by the caller (App).
+  const activeAnalysisId = selectedAnalysisId?.trim() ?? ''
+  if (activeAnalysisId !== '') {
+    return (
+      <SavedAnalysisDetailsPage
+        analysisId={activeAnalysisId}
+        onBack={onBack}
+      />
+    )
+  }
 
   const loading = state.status === 'loading'
 
@@ -486,6 +564,7 @@ export function ClaimsHistoryPage() {
             void runHistory(state.claimId, state.offset)
           }
         }}
+        onOpenAnalysis={onOpenAnalysis}
       />
     </>
   )
@@ -495,10 +574,12 @@ function HistoryResult({
   state,
   onPage,
   onRetry,
+  onOpenAnalysis,
 }: {
   state: HistoryState
   onPage: (offset: number) => void
   onRetry: () => void
+  onOpenAnalysis?: (analysisId: string) => void
 }) {
   if (state.status === 'success') {
     if (state.page.items.length === 0) {
@@ -516,6 +597,7 @@ function HistoryResult({
         page={state.page}
         claimId={state.claimId}
         onPage={onPage}
+        onOpenAnalysis={onOpenAnalysis}
       />
     )
   }

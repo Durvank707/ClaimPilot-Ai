@@ -2,19 +2,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ClaimsHistoryPage } from './ClaimsHistoryPage'
 import {
+  getAnalysisById,
   getClaimAnalysisHistory,
   type AnalysisHistoryItem,
   type AnalysisHistoryPage,
+  type SavedAnalysis,
 } from '../api/retrieval'
 import { ApiError } from '../api/errors'
 
-// Mock the retrieval API function itself so no backend is required.
+// Mock the retrieval API functions themselves so no backend is required.
 vi.mock('../api/retrieval', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/retrieval')>()
-  return { ...actual, getClaimAnalysisHistory: vi.fn() }
+  return {
+    ...actual,
+    getClaimAnalysisHistory: vi.fn(),
+    getAnalysisById: vi.fn(),
+  }
 })
 
 const mockedGetClaimAnalysisHistory = vi.mocked(getClaimAnalysisHistory)
+const mockedGetAnalysisById = vi.mocked(getAnalysisById)
 
 function item(
   overrides: Partial<AnalysisHistoryItem> = {},
@@ -55,6 +62,21 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+/** A saved analysis matching the real retrieval contract. */
+function saved(analysisId: string): SavedAnalysis {
+  return {
+    analysis_id: analysisId,
+    claim_id: 'CLM-1',
+    analyzed_at: '2024-05-01T10:00:00',
+    fraud: { probability: 0.375 },
+    severity: { predicted_claim_amount: 18500 },
+    anomaly: { score: -0.047 },
+    risk: { score: 31.2, level: 'MEDIUM', components: null },
+    explanation: null,
+    decision: null,
+  }
+}
+
 function renderPage() {
   return render(<ClaimsHistoryPage />)
 }
@@ -82,6 +104,7 @@ async function typeAndSearch(value: string) {
 
 beforeEach(() => {
   mockedGetClaimAnalysisHistory.mockReset()
+  mockedGetAnalysisById.mockReset()
 })
 
 describe('ClaimsHistoryPage', () => {
@@ -415,5 +438,67 @@ describe('ClaimsHistoryPage', () => {
 
     expect(screen.getByText('NEWEST')).toBeDefined()
     expect(screen.queryByText('STALE')).toBeNull()
+  })
+
+  it("opens a row's saved analysis using its analysis_id", async () => {
+    mockedGetClaimAnalysisHistory.mockResolvedValueOnce(
+      page({ items: [item({ analysis_id: 'AN-42' })] }),
+    )
+    const onOpenAnalysis = vi.fn()
+    render(<ClaimsHistoryPage onOpenAnalysis={onOpenAnalysis} />)
+
+    await typeAndSearch('CLM-1')
+    await screen.findByRole('table')
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /view details for analysis AN-42/i }),
+    )
+
+    expect(onOpenAnalysis).toHaveBeenCalledTimes(1)
+    expect(onOpenAnalysis).toHaveBeenCalledWith('AN-42')
+    // The claim id must never be used in place of the analysis id.
+    expect(onOpenAnalysis).not.toHaveBeenCalledWith('CLM-1')
+  })
+
+  it('does not render a usable action when a row has no analysis id', async () => {
+    mockedGetClaimAnalysisHistory.mockResolvedValueOnce(
+      page({ items: [item({ analysis_id: null })] }),
+    )
+    const onOpenAnalysis = vi.fn()
+    render(<ClaimsHistoryPage onOpenAnalysis={onOpenAnalysis} />)
+
+    await typeAndSearch('CLM-1')
+    await screen.findByRole('table')
+
+    const button = screen.getByRole('button', {
+      name: /view details unavailable/i,
+    }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+
+    fireEvent.click(button)
+    expect(onOpenAnalysis).not.toHaveBeenCalled()
+  })
+
+  it('renders the selected saved analysis and returns via the back action', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved('AN-7'))
+    const onBack = vi.fn()
+    render(<ClaimsHistoryPage selectedAnalysisId="AN-7" onBack={onBack} />)
+
+    expect(await screen.findByText('Analysis summary')).toBeDefined()
+    expect(screen.getByText('Analysis ID: AN-7')).toBeDefined()
+    expect(mockedGetAnalysisById).toHaveBeenCalledWith('AN-7')
+    // No list request is made while showing a contextual detail.
+    expect(mockedGetClaimAnalysisHistory).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(onBack).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not request a saved analysis for a blank selection', () => {
+    render(<ClaimsHistoryPage selectedAnalysisId="   " />)
+
+    expect(mockedGetAnalysisById).not.toHaveBeenCalled()
+    // Falls back to the normal list view.
+    expect(screen.getByText('No claim selected')).toBeDefined()
   })
 })
