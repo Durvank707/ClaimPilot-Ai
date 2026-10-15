@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 .env
@@ -12,7 +13,8 @@ venv/
 data/raw/
 data/processed/
 data/external/
-models/
+# Trained model artifacts live at the repo root (src/claimpilot/models/ is source).
+/models/
 *.pkl
 *.joblib
 *.pt
