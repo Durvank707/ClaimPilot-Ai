@@ -90,9 +90,36 @@ pip install -r requirements.txt
 # Copy environment variables
 cp .env.example .env
 
-# Run tests
+# Run tests (uses an isolated local SQLite database, never the production one)
+# Windows PowerShell: $env:PYTHONPATH = "src"
+export PYTHONPATH=src
 pytest
+
+# Start the backend API (interactive docs at http://localhost:8000/docs)
+# Windows PowerShell: $env:PYTHONPATH = "src"
+export PYTHONPATH=src
+python -m uvicorn backend.main:app --port 8000
 ```
+
+## ⚙️ Configuration
+
+Backend configuration is read from `.env` in the project root (copy `.env.example`; `.env` is git-ignored — never commit real credentials).
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | ✅ | SQLAlchemy database URL — the single source of truth for the database target |
+| `PYTHONPATH` | ✅ | Set to `src` so the backend and tests can import `claimpilot` |
+| `APP_ENV` | — | Environment label (default `development`) |
+| `LOG_LEVEL` | — | Logging verbosity (default `INFO`) |
+
+**Supported database targets**
+
+- **Local development / tests — SQLite:** `DATABASE_URL=sqlite:///./claimpilot.db`. No external service or driver required. The test suite forces its own isolated temp-file SQLite database before the app is imported, so tests never touch the production database.
+- **PostgreSQL (e.g. Supabase):** use a `postgresql://` URL such as `postgresql+psycopg2://…` (see `.env.example`). The scheme token selects the driver, and both drivers are installed via `requirements.txt`: `postgresql+psycopg2://` → `psycopg2-binary`; a bare `postgresql://` URL (the SQLAlchemy 2.1 default) or explicit `postgresql+psycopg://` → `psycopg` (v3). Schema migrations live in `alembic/versions` and are applied with `alembic upgrade head`. Successfully constructing the engine proves driver compatibility only — it is not a connectivity test.
+
+**Frontend:** the API base URL comes from `VITE_API_BASE_URL` (see `frontend/.env.example` and `frontend/README.md`). The backend currently sends no CORS headers, so for local development set it to an empty string **in `frontend/.env`** — requests then go through the Vite dev proxy (`/api` → `http://localhost:8000`). An empty *shell-level* variable is treated as unset by Vite, so use the `.env` file rather than exporting it. The frontend never hardcodes a backend URL.
+
+**Local vs. production:** use SQLite + the Vite dev proxy locally; point `DATABASE_URL` at PostgreSQL/Supabase only when you intend to use that database.
 
 ## 📁 Directory Structure
 
