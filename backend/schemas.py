@@ -32,3 +32,8 @@ class ClaimResponse(BaseModel):
     risk: dict
     explanation: dict
     decision: dict
+    # Step 2: persistence status. `analysis_id` is the UUID of the stored
+    # analysis record (None when persistence failed); `persisted` reports
+    # whether the claim and analysis were committed together.
+    analysis_id: Optional[str] = None
+    persisted: bool = False

@@ -74,7 +74,7 @@ class ClaimAnalyzer:
             amt_pct = 0.5
         dec = self.de.decide(fp, ap, sp, riskv, level, amt_pct)
         exp = self.explainer.explain_risk(fp, ap, sp, riskv, level, {"fraud": fp*100, "anomaly": ap*100, "severity": sn})
-        return {
+        res = {
             "claim_id": data.get("policy_id"),
             "fraud": {"probability": fp},
             "severity": {"predicted_claim_amount": sp},
@@ -83,3 +83,4 @@ class ClaimAnalyzer:
             "explanation": exp,
             "decision": dec
         }
+        return res
