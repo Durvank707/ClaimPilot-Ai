@@ -8,6 +8,7 @@ import {
   type AnalysisHistoryPage,
   type SavedAnalysis,
 } from '../api/retrieval'
+import { getAnalysisReviews } from '../api/reviews'
 import { ApiError } from '../api/errors'
 
 // Mock the retrieval API functions themselves so no backend is required.
@@ -20,8 +21,19 @@ vi.mock('../api/retrieval', async (importOriginal) => {
   }
 })
 
+// The human review panel is rendered by SavedAnalysisDetailsPage; mock it too.
+vi.mock('../api/reviews', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/reviews')>()
+  return {
+    ...actual,
+    createReview: vi.fn(),
+    getAnalysisReviews: vi.fn(),
+  }
+})
+
 const mockedGetClaimAnalysisHistory = vi.mocked(getClaimAnalysisHistory)
 const mockedGetAnalysisById = vi.mocked(getAnalysisById)
+const mockedGetAnalysisReviews = vi.mocked(getAnalysisReviews)
 
 function item(
   overrides: Partial<AnalysisHistoryItem> = {},
@@ -105,6 +117,8 @@ async function typeAndSearch(value: string) {
 beforeEach(() => {
   mockedGetClaimAnalysisHistory.mockReset()
   mockedGetAnalysisById.mockReset()
+  mockedGetAnalysisReviews.mockReset()
+  mockedGetAnalysisReviews.mockResolvedValue([])
 })
 
 describe('ClaimsHistoryPage', () => {

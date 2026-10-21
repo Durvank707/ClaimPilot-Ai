@@ -1,4 +1,4 @@
-import { API_BASE_URL, DEFAULT_TIMEOUT_MS } from './config'
+import { API_BASE_URL, API_TOKEN, DEFAULT_TIMEOUT_MS } from './config'
 import { ApiError } from './errors'
 
 export interface RequestOptions {
@@ -103,6 +103,9 @@ export async function requestJson(
         headers: {
           Accept: 'application/json',
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          // Attach the shared bearer token only when one is configured; an
+          // unconfigured token means no `Authorization` header at all.
+          ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
           ...headers,
         },
         body: body === undefined ? undefined : JSON.stringify(body),

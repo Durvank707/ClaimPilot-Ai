@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { SavedAnalysisDetailsPage } from './SavedAnalysisDetailsPage'
 import { getAnalysisById, type SavedAnalysis } from '../api/retrieval'
+import { createReview, getAnalysisReviews, type Review } from '../api/reviews'
 import { ApiError } from '../api/errors'
 
 // Mock the retrieval API function itself so no backend is required.
@@ -10,7 +11,19 @@ vi.mock('../api/retrieval', async (importOriginal) => {
   return { ...actual, getAnalysisById: vi.fn() }
 })
 
+// Mock the reviews API functions so the human review panel needs no backend.
+vi.mock('../api/reviews', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/reviews')>()
+  return {
+    ...actual,
+    createReview: vi.fn(),
+    getAnalysisReviews: vi.fn(),
+  }
+})
+
 const mockedGetAnalysisById = vi.mocked(getAnalysisById)
+const mockedGetAnalysisReviews = vi.mocked(getAnalysisReviews)
+const mockedCreateReview = vi.mocked(createReview)
 
 /**
  * A saved analysis matching the real `AnalysisDB` contract, including the
@@ -93,8 +106,26 @@ function renderPage(
   )
 }
 
+/** A saved human review matching the real `Review` contract. */
+function review(overrides: Partial<Review> = {}): Review {
+  return {
+    review_id: 'REV-1',
+    final_decision: 'APPROVED',
+    reviewer_id: 'OFFICER-7',
+    comments: 'Documents verified.',
+    reviewed_at: '2024-05-02T09:30:00',
+    analysis_id: 'AN-1',
+    claim_id: 'CLM-1',
+    ...overrides,
+  }
+}
+
 beforeEach(() => {
   mockedGetAnalysisById.mockReset()
+  mockedGetAnalysisReviews.mockReset()
+  mockedCreateReview.mockReset()
+  // Default: the analysis has no reviews yet. Individual tests override this.
+  mockedGetAnalysisReviews.mockResolvedValue([])
 })
 
 describe('SavedAnalysisDetailsPage', () => {
@@ -445,5 +476,185 @@ describe('SavedAnalysisDetailsPage', () => {
     expect(await screen.findByText('Analysis summary')).toBeDefined()
     expect(mockedGetAnalysisById).toHaveBeenCalledTimes(2)
     expect(mockedGetAnalysisById).toHaveBeenLastCalledWith('AN-1')
+  })
+})
+
+describe('SavedAnalysisDetailsPage — human review', () => {
+  it('shows the reviews already saved for the analysis', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    mockedGetAnalysisReviews.mockReset()
+    mockedGetAnalysisReviews.mockResolvedValueOnce([
+      review({ final_decision: 'REJECTED', reviewer_id: 'OFFICER-7', comments: 'Missing documents' }),
+    ])
+    renderPage('AN-1')
+
+    await screen.findByText('Analysis summary')
+    // The "Human review" heading renders with the panel, but the saved reviews
+    // arrive asynchronously. Wait for the actual review content before asserting
+    // synchronously, otherwise the assertions race the reviews request.
+    expect(await screen.findByText('OFFICER-7')).toBeDefined()
+    expect(screen.getByText('Human review')).toBeDefined()
+    expect(screen.getAllByText('REJECTED').length).toBeGreaterThan(0)
+    expect(screen.getByText('Missing documents')).toBeDefined()
+    expect(mockedGetAnalysisReviews).toHaveBeenCalledWith('AN-1')
+  })
+
+  it('shows an explicit empty state when no reviews are saved', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    renderPage('AN-1')
+
+    await screen.findByText('Human review')
+    expect(
+      await screen.findByText('No human review has been recorded for this analysis yet.'),
+    ).toBeDefined()
+  })
+
+  it('records a review, reports success, and refreshes the saved list', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    mockedGetAnalysisReviews.mockReset()
+    mockedGetAnalysisReviews
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        review({ final_decision: 'APPROVED', reviewer_id: 'OFFICER-9', comments: 'All good' }),
+      ])
+    mockedCreateReview.mockResolvedValueOnce(
+      review({ final_decision: 'APPROVED', reviewer_id: 'OFFICER-9', comments: 'All good' }),
+    )
+    renderPage('AN-1')
+    await screen.findByText('Human review')
+
+    fireEvent.change(screen.getByLabelText(/outcome/i), {
+      target: { value: 'APPROVED' },
+    })
+    fireEvent.change(screen.getByLabelText(/reviewer id/i), {
+      target: { value: 'OFFICER-9' },
+    })
+    fireEvent.change(screen.getByLabelText(/notes/i), {
+      target: { value: 'All good' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save review/i }))
+
+    expect(await screen.findByText('Review saved')).toBeDefined()
+    expect(mockedCreateReview).toHaveBeenCalledWith('AN-1', {
+      final_decision: 'APPROVED',
+      reviewer_id: 'OFFICER-9',
+      comments: 'All good',
+    })
+    // The saved list is refreshed from the server and shows the new review.
+    expect(await screen.findByText('OFFICER-9')).toBeDefined()
+    expect(mockedGetAnalysisReviews).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires an outcome and does not call the API without one', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    renderPage('AN-1')
+    await screen.findByText('Human review')
+
+    fireEvent.click(screen.getByRole('button', { name: /save review/i }))
+
+    expect(await screen.findByText('Select a review outcome.')).toBeDefined()
+    expect(mockedCreateReview).not.toHaveBeenCalled()
+  })
+
+  it('disables submission while a request is in progress to prevent duplicates', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    const pending = deferred<Review>()
+    mockedCreateReview.mockImplementationOnce(() => pending.promise)
+    renderPage('AN-1')
+    await screen.findByText('Human review')
+
+    fireEvent.change(screen.getByLabelText(/outcome/i), {
+      target: { value: 'ESCALATED' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save review/i }))
+
+    const button = (await screen.findByRole('button', {
+      name: /saving/i,
+    })) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.getAttribute('aria-busy')).toBe('true')
+
+    // A second activation must not start another request.
+    fireEvent.click(button)
+    expect(mockedCreateReview).toHaveBeenCalledTimes(1)
+
+    pending.resolve(review({ final_decision: 'ESCALATED' }))
+    expect(await screen.findByText('Review saved')).toBeDefined()
+  })
+
+  it('shows an error and never claims success when saving fails', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    mockedCreateReview.mockRejectedValueOnce(
+      new ApiError('http', 'server error', { status: 500 }),
+    )
+    renderPage('AN-1')
+    await screen.findByText('Human review')
+
+    fireEvent.change(screen.getByLabelText(/outcome/i), {
+      target: { value: 'REJECTED' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save review/i }))
+
+    expect(
+      await screen.findByText('The review could not be saved'),
+    ).toBeDefined()
+    expect(
+      screen.getAllByText('The backend returned an error (HTTP 500).').length,
+    ).toBeGreaterThan(0)
+    expect(screen.queryByText('Review saved')).toBeNull()
+  })
+
+  it('maps a server validation error onto the outcome field', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    mockedCreateReview.mockRejectedValueOnce(
+      new ApiError('http', 'unprocessable', {
+        status: 422,
+        details: {
+          detail: [
+            { loc: ['body', 'final_decision'], msg: 'Invalid outcome' },
+          ],
+        },
+      }),
+    )
+    renderPage('AN-1')
+    await screen.findByText('Human review')
+
+    fireEvent.change(screen.getByLabelText(/outcome/i), {
+      target: { value: 'APPROVED' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save review/i }))
+
+    expect(await screen.findByText('Invalid outcome')).toBeDefined()
+  })
+
+  it('distinguishes a missing analysis when reviews cannot be loaded', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    mockedGetAnalysisReviews.mockReset()
+    mockedGetAnalysisReviews.mockRejectedValueOnce(
+      new ApiError('http', 'not found', { status: 404 }),
+    )
+    renderPage('AN-1')
+
+    expect(
+      await screen.findByText(
+        'This analysis is no longer available, so its reviews could not be loaded.',
+      ),
+    ).toBeDefined()
+  })
+
+  it('surfaces a network error when reviews cannot be loaded', async () => {
+    mockedGetAnalysisById.mockResolvedValueOnce(saved())
+    mockedGetAnalysisReviews.mockReset()
+    mockedGetAnalysisReviews.mockRejectedValueOnce(
+      new ApiError('network', 'offline'),
+    )
+    renderPage('AN-1')
+
+    expect(
+      await screen.findByText('Saved reviews could not be loaded'),
+    ).toBeDefined()
+    expect(
+      screen.getAllByText('Could not reach the backend service.').length,
+    ).toBeGreaterThan(0)
   })
 })

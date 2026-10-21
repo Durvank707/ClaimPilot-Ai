@@ -4,6 +4,7 @@ import {
   formatDate,
   formatNumber,
   formatPercent,
+  formatWaitingAge,
   getNumber,
   getString,
   to0to100,
@@ -67,5 +68,29 @@ describe('formatters', () => {
     expect(formatDate('   ')).toBeNull()
     expect(formatDate(123)).toBeNull()
     expect(formatDate('not a date')).toBe('not a date')
+  })
+
+  it('formatWaitingAge describes elapsed time in coarse units', () => {
+    const now = new Date('2024-06-01T12:00:00Z')
+    expect(formatWaitingAge('2024-06-01T11:59:00Z', now)).toBe('Less than an hour')
+    expect(formatWaitingAge('2024-06-01T09:00:00Z', now)).toBe('3 hours')
+    expect(formatWaitingAge('2024-06-01T11:00:00Z', now)).toBe('1 hour')
+    expect(formatWaitingAge('2024-05-31T12:00:00Z', now)).toBe('1 day')
+    expect(formatWaitingAge('2024-05-25T12:00:00Z', now)).toBe('7 days')
+    expect(formatWaitingAge('2024-05-11T12:00:00Z', now)).toBe('3 weeks')
+    expect(formatWaitingAge('2024-03-01T12:00:00Z', now)).toBe('3 months')
+  })
+
+  it('formatWaitingAge treats naive timestamps as UTC and handles missing values', () => {
+    const now = new Date('2024-06-01T12:00:00Z')
+    expect(formatWaitingAge('2024-06-01T09:00:00', now)).toBe('3 hours')
+    expect(formatWaitingAge(null)).toBeNull()
+    expect(formatWaitingAge(undefined)).toBeNull()
+    expect(formatWaitingAge('')).toBeNull()
+    expect(formatWaitingAge('   ')).toBeNull()
+    expect(formatWaitingAge(123)).toBeNull()
+    expect(formatWaitingAge('not a date', now)).toBeNull()
+    // A future timestamp never produces a negative age.
+    expect(formatWaitingAge('2024-07-01T12:00:00Z', now)).toBe('Less than an hour')
   })
 })

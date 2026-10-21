@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { PageHeader } from '../components/ui/PageHeader'
 import {
   Card,
@@ -12,7 +12,16 @@ import { StatePanel } from '../components/ui/StatePanel'
 import { Callout } from '../components/ui/Callout'
 import { Badge, RiskBadge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
-import { ShieldIcon } from '../components/icons'
+import { FormField } from '../components/ui/FormField'
+import { Input } from '../components/ui/Input'
+import { Select } from '../components/ui/Select'
+import { Textarea } from '../components/ui/Textarea'
+import {
+  AlertIcon,
+  CheckIcon,
+  ShieldIcon,
+  UsersIcon,
+} from '../components/icons'
 import {
   formatCurrency,
   formatDate,
@@ -23,6 +32,14 @@ import {
   isRecord,
 } from '../features/claimAnalysis/formatters'
 import { getAnalysisById, type SavedAnalysis } from '../api/retrieval'
+import {
+  createReview,
+  describeReviewError,
+  getAnalysisReviews,
+  REVIEW_OUTCOMES,
+  type Review,
+  type ReviewOutcome,
+} from '../api/reviews'
 import { describeApiError, isApiError } from '../api/errors'
 
 /**
@@ -668,6 +685,371 @@ function SavedAnalysisDetails({ analysis }: { analysis: SavedAnalysis }) {
   )
 }
 
+type ReviewsState =
+  | { analysisId: string; status: 'success'; reviews: Review[] }
+  | { analysisId: string; status: 'error'; message: string }
+
+type ReviewSubmitState =
+  | { status: 'idle' }
+  | { status: 'submitting' }
+  | { status: 'success'; review: Review }
+  | { status: 'error' }
+
+/** Colour-coded tone for a recorded human outcome (never the sole signal). */
+function outcomeTone(
+  outcome: string | null,
+): 'low' | 'critical' | 'medium' | 'high' | 'neutral' {
+  switch (outcome) {
+    case 'APPROVED':
+      return 'low'
+    case 'REJECTED':
+      return 'critical'
+    case 'NEEDS_MORE_INFO':
+      return 'medium'
+    case 'ESCALATED':
+      return 'high'
+    default:
+      return 'neutral'
+  }
+}
+
+/** Map a failed reviews request onto a safe message. 404 is not "no reviews". */
+function reviewLoadMessage(error: unknown): string {
+  if (isApiError(error) && error.kind === 'http' && error.status === 404) {
+    return 'This analysis is no longer available, so its reviews could not be loaded.'
+  }
+  return describeApiError(error)
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+    />
+  )
+}
+
+/** A single previously saved human review. */
+function SavedReviewItem({ review }: { review: Review }) {
+  const notes =
+    review.comments && review.comments.trim() !== '' ? review.comments : null
+  return (
+    <li className="rounded-lg border border-ink-200 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Badge tone={outcomeTone(review.final_decision)} withDot>
+          {review.final_decision ?? 'Not available'}
+        </Badge>
+        <span className="text-xs text-ink-500">
+          {formatDate(review.reviewed_at) ?? MISSING}
+        </span>
+      </div>
+      <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+        <DetailItem term="Reviewer" value={review.reviewer_id} />
+        <DetailItem term="Review ID" value={review.review_id} />
+      </dl>
+      <div className="mt-2">
+        <p className="text-xs text-ink-500">Notes</p>
+        <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink-700">
+          {notes ?? MISSING}
+        </p>
+      </div>
+    </li>
+  )
+}
+
+/**
+ * Human review panel.
+ *
+ * Shows the reviews already saved for this analysis and lets a human reviewer
+ * record a new one. The reviewer chooses the outcome; the platform only stores
+ * it. After a successful save the panel re-fetches the reviews so the displayed
+ * data reflects what was persisted.
+ */
+function HumanReviewPanel({ analysisId }: { analysisId: string }) {
+  const [reviews, setReviews] = useState<ReviewsState | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const reviewsSeq = useRef(0)
+
+  const [outcome, setOutcome] = useState('')
+  const [reviewerId, setReviewerId] = useState('')
+  const [notes, setNotes] = useState('')
+  const [outcomeError, setOutcomeError] = useState<string | undefined>(undefined)
+  const [submitError, setSubmitError] = useState<string | undefined>(undefined)
+  const [submission, setSubmission] = useState<ReviewSubmitState>({
+    status: 'idle',
+  })
+  const [announcement, setAnnouncement] = useState('')
+  // Synchronous guard so a rapid double-activation cannot start two requests.
+  const inFlight = useRef(false)
+
+  useEffect(() => {
+    const token = ++reviewsSeq.current
+    let active = true
+
+    getAnalysisReviews(analysisId)
+      .then((items) => {
+        if (!active || token !== reviewsSeq.current) return
+        setReviews({ analysisId, status: 'success', reviews: items })
+      })
+      .catch((error: unknown) => {
+        if (!active || token !== reviewsSeq.current) return
+        setReviews({
+          analysisId,
+          status: 'error',
+          message: reviewLoadMessage(error),
+        })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [analysisId, reloadKey])
+
+  // A result for a different analysis is stale; treat it as "not loaded yet".
+  const currentReviews =
+    reviews !== null && reviews.analysisId === analysisId ? reviews : null
+
+  const refresh = () => {
+    setReviews(null)
+    setReloadKey((n) => n + 1)
+  }
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (inFlight.current) return
+
+    if (outcome.trim() === '') {
+      setOutcomeError('Select a review outcome.')
+      setSubmission({ status: 'idle' })
+      setAnnouncement('Review not saved. Select a review outcome.')
+      return
+    }
+
+    inFlight.current = true
+    setOutcomeError(undefined)
+    setSubmitError(undefined)
+    setSubmission({ status: 'submitting' })
+    setAnnouncement('Saving the human review.')
+
+    try {
+      const review = await createReview(analysisId, {
+        final_decision: outcome as ReviewOutcome,
+        reviewer_id: reviewerId,
+        comments: notes,
+      })
+      setSubmission({ status: 'success', review })
+      setOutcome('')
+      setReviewerId('')
+      setNotes('')
+      setAnnouncement('Review saved.')
+      // Refresh the displayed reviews from the server after a successful save.
+      refresh()
+    } catch (error) {
+      const info = describeReviewError(error)
+      if (info.fieldErrors.final_decision) {
+        setOutcomeError(info.fieldErrors.final_decision)
+      }
+      setSubmitError(info.message)
+      setSubmission({ status: 'error' })
+      setAnnouncement('The review could not be saved.')
+    } finally {
+      inFlight.current = false
+    }
+  }
+
+  const submitting = submission.status === 'submitting'
+  const savedReviews =
+    currentReviews?.status === 'success' ? currentReviews.reviews : null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardHeading
+          title="Human review"
+          description="Saved reviews for this analysis and the reviewer's decision."
+          icon={<UsersIcon width={16} height={16} />}
+        />
+        {savedReviews ? (
+          <Badge tone={savedReviews.length > 0 ? 'info' : 'neutral'}>
+            {savedReviews.length}{' '}
+            {savedReviews.length === 1 ? 'review' : 'reviews'}
+          </Badge>
+        ) : null}
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-5">
+        <div>
+          <p className="text-sm font-medium text-navy-800">Saved reviews</p>
+
+          {currentReviews === null ? (
+            <p className="mt-1 text-sm text-ink-500">Loading saved reviews…</p>
+          ) : null}
+
+          {currentReviews?.status === 'error' ? (
+            <Callout
+              tone="warning"
+              title="Saved reviews could not be loaded"
+              icon={<AlertIcon width={18} height={18} />}
+              className="mt-2"
+            >
+              <p>{currentReviews.message}</p>
+              <div className="mt-2">
+                <Button variant="secondary" size="sm" onClick={refresh}>
+                  Try again
+                </Button>
+              </div>
+            </Callout>
+          ) : null}
+
+          {savedReviews && savedReviews.length === 0 ? (
+            <p className="mt-1 text-sm text-ink-600">
+              No human review has been recorded for this analysis yet.
+            </p>
+          ) : null}
+
+          {savedReviews && savedReviews.length > 0 ? (
+            <ul className="mt-2 flex flex-col gap-3">
+              {savedReviews.map((review) => (
+                <SavedReviewItem key={review.review_id} review={review} />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        <div className="border-t border-ink-200 pt-4">
+          <p className="text-sm font-medium text-navy-800">Record a review</p>
+          <p className="mt-1 text-xs text-ink-500">
+            Your decision is stored against this analysis. ClaimPilot does not
+            decide — the human reviewer does.
+          </p>
+
+          {submission.status === 'success' ? (
+            <Callout
+              tone="success"
+              title="Review saved"
+              icon={<CheckIcon width={18} height={18} />}
+              className="mt-3"
+            >
+              Outcome recorded as{' '}
+              {submission.review.final_decision ?? 'Not available'}.
+            </Callout>
+          ) : null}
+
+          {submitError ? (
+            <Callout
+              tone="warning"
+              title="The review could not be saved"
+              icon={<AlertIcon width={18} height={18} />}
+              className="mt-3"
+            >
+              <p>{submitError}</p>
+            </Callout>
+          ) : null}
+
+          <form
+            noValidate
+            autoComplete="off"
+            aria-label="Human review form"
+            onSubmit={handleSubmit}
+            className="mt-4 flex flex-col gap-4"
+          >
+            <fieldset className="min-w-0 border-0 p-0" disabled={submitting}>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <FormField
+                  label="Outcome"
+                  required
+                  error={outcomeError}
+                  hint="The decision you are recording."
+                >
+                  {({ id, describedBy, invalid }) => (
+                    <Select
+                      id={id}
+                      name="final_decision"
+                      value={outcome}
+                      options={REVIEW_OUTCOMES}
+                      invalid={invalid}
+                      aria-describedby={describedBy}
+                      onChange={(event) => {
+                        setOutcome(event.target.value)
+                        if (outcomeError !== undefined) setOutcomeError(undefined)
+                      }}
+                    />
+                  )}
+                </FormField>
+
+                <FormField
+                  label="Reviewer ID"
+                  hint="Your officer/reviewer identifier (optional)."
+                >
+                  {({ id, describedBy }) => (
+                    <Input
+                      id={id}
+                      name="reviewer_id"
+                      type="text"
+                      value={reviewerId}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="e.g. OFFICER-123"
+                      aria-describedby={describedBy}
+                      onChange={(event) => setReviewerId(event.target.value)}
+                    />
+                  )}
+                </FormField>
+              </div>
+
+              <div className="mt-4">
+                <FormField
+                  label="Notes"
+                  hint="Optional context for this decision."
+                >
+                  {({ id, describedBy }) => (
+                    <Textarea
+                      id={id}
+                      name="comments"
+                      rows={3}
+                      value={notes}
+                      aria-describedby={describedBy}
+                      onChange={(event) => setNotes(event.target.value)}
+                    />
+                  )}
+                </FormField>
+              </div>
+            </fieldset>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button type="submit" disabled={submitting} aria-busy={submitting}>
+                {submitting ? (
+                  <>
+                    <Spinner />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <CheckIcon width={16} height={16} />
+                    Save review
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </div>
+
+        <p className="sr-only" role="status" aria-live="polite">
+          {announcement}
+        </p>
+      </CardContent>
+
+      <CardFooter>
+        <p className="text-xs text-ink-500">
+          Reviews record a human decision. The platform never approves, rejects,
+          denies or accuses a claim automatically.
+        </p>
+      </CardFooter>
+    </Card>
+  )
+}
+
 export interface SavedAnalysisDetailsPageProps {
   /**
    * The saved analysis to display. A blank/null value means no analysis is
@@ -731,7 +1113,12 @@ export function SavedAnalysisDetailsPage({
       </div>
     )
   } else if (current?.status === 'success') {
-    content = <SavedAnalysisDetails analysis={current.analysis} />
+    content = (
+      <div className="flex flex-col gap-6">
+        <SavedAnalysisDetails analysis={current.analysis} />
+        <HumanReviewPanel analysisId={current.analysisId} />
+      </div>
+    )
   } else if (current?.status === 'error') {
     const copy = errorCopy(current.error)
     content = (

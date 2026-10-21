@@ -7,7 +7,10 @@ import { ApiError } from './errors'
  * (`backend/routers/health.py`):
  *
  *   GET /api/v1/health -> { "status": "healthy" }
- *   GET /api/v1/ready  -> { "status": "ready" | "not_ready", "models_loaded": bool }
+ *   GET /api/v1/ready  -> { "status": "ready" | "not_ready",
+ *                           "models_loaded": bool,
+ *                           "database_initialized": bool,
+ *                           "auth_configured": bool }
  *
  * Note that `/ready` returns HTTP 200 even when the service is not ready, so
  * readiness must be decided from the body rather than the status code.
@@ -19,6 +22,10 @@ export interface HealthResponse {
 export interface ReadyResponse {
   status: string
   models_loaded: boolean
+  /** Additive (Phase 1); absent against an older backend. */
+  database_initialized?: boolean
+  /** Additive (Phase 1); absent against an older backend. */
+  auth_configured?: boolean
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,15 +52,46 @@ export function parseReadyResponse(value: unknown): ReadyResponse {
       'Readiness response did not match the expected shape',
     )
   }
-  return { status: value.status, models_loaded: value.models_loaded }
+  const response: ReadyResponse = {
+    status: value.status,
+    models_loaded: value.models_loaded,
+  }
+  // The added fields are optional so an older backend still parses, but when
+  // present they must be booleans.
+  if (value.database_initialized !== undefined) {
+    if (typeof value.database_initialized !== 'boolean') {
+      throw new ApiError('parse', 'Readiness "database_initialized" was not a boolean')
+    }
+    response.database_initialized = value.database_initialized
+  }
+  if (value.auth_configured !== undefined) {
+    if (typeof value.auth_configured !== 'boolean') {
+      throw new ApiError('parse', 'Readiness "auth_configured" was not a boolean')
+    }
+    response.auth_configured = value.auth_configured
+  }
+  return response
 }
 
 /**
  * The backend reports readiness as "ready" once the analysis models have been
- * loaded. Both conditions must hold to treat the service as ready.
+ * loaded and the database/auth configuration is sound. When the additive fields
+ * are absent (older backend) only the original two signals are required.
  */
 export function isReady(response: ReadyResponse): boolean {
-  return response.status === 'ready' && response.models_loaded === true
+  if (response.status !== 'ready' || response.models_loaded !== true) {
+    return false
+  }
+  if (
+    response.database_initialized !== undefined &&
+    response.database_initialized !== true
+  ) {
+    return false
+  }
+  if (response.auth_configured !== undefined && response.auth_configured !== true) {
+    return false
+  }
+  return true
 }
 
 /** Fetch and validate the backend liveness response. */

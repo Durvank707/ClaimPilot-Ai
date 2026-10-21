@@ -47,6 +47,22 @@ describe('parseReadyResponse', () => {
     )
   })
 
+  it('accepts the additive readiness fields when present', () => {
+    expect(
+      parseReadyResponse({
+        status: 'ready',
+        models_loaded: true,
+        database_initialized: true,
+        auth_configured: true,
+      }),
+    ).toEqual({
+      status: 'ready',
+      models_loaded: true,
+      database_initialized: true,
+      auth_configured: true,
+    })
+  })
+
   it('rejects a payload missing models_loaded', () => {
     expect(() => parseReadyResponse({ status: 'ready' })).toThrowError(
       expect.objectContaining({ kind: 'parse' }),
@@ -58,6 +74,16 @@ describe('parseReadyResponse', () => {
       parseReadyResponse({ status: 'ready', models_loaded: 'yes' }),
     ).toThrowError(expect.objectContaining({ kind: 'parse' }))
   })
+
+  it('rejects a non-boolean additive field', () => {
+    expect(() =>
+      parseReadyResponse({
+        status: 'ready',
+        models_loaded: true,
+        auth_configured: 'yes',
+      }),
+    ).toThrowError(expect.objectContaining({ kind: 'parse' }))
+  })
 })
 
 describe('isReady', () => {
@@ -65,6 +91,27 @@ describe('isReady', () => {
     expect(isReady({ status: 'ready', models_loaded: true })).toBe(true)
     expect(isReady({ status: 'ready', models_loaded: false })).toBe(false)
     expect(isReady({ status: 'not_ready', models_loaded: true })).toBe(false)
+  })
+
+  it('honours the additive fields when present', () => {
+    expect(
+      isReady({
+        status: 'ready',
+        models_loaded: true,
+        database_initialized: false,
+      }),
+    ).toBe(false)
+    expect(
+      isReady({ status: 'ready', models_loaded: true, auth_configured: false }),
+    ).toBe(false)
+    expect(
+      isReady({
+        status: 'ready',
+        models_loaded: true,
+        database_initialized: true,
+        auth_configured: true,
+      }),
+    ).toBe(true)
   })
 })
 

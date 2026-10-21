@@ -5,11 +5,11 @@ insurance claims intelligence platform. The UI is designed for claims officers:
 it presents model outputs as decision support and never approves, rejects or
 accuses.
 
-> **Status:** Step 5 — backend claim submission. The form validates input and
-> submits to the real `POST /api/v1/claims/analyze` endpoint, with loading,
-> error and success states. On success it shows only the identifiers the API
-> actually returns. The detailed results dashboard, claims history and lookup
-> are later steps.
+> **Status:** the dashboard covers claim submission, the analysis results view,
+> claims history, claim lookup, and the human-in-the-loop review workflow. It
+> presents model outputs as decision support and never approves, rejects or
+> accuses. Authentication is a shared service token only (see "Authentication");
+> per-reviewer identity is a later, separate change.
 
 ## Requirements
 
@@ -45,14 +45,44 @@ Copy `.env.example` to `.env` and adjust as needed:
 
 ```text
 VITE_API_BASE_URL=http://localhost:8000
+# VITE_API_TOKEN=            # optional; see "Authentication" below
 ```
 
-`.env` is git-ignored. Never place secrets (database credentials, Supabase
-service-role keys, etc.) in frontend configuration — all privileged access
-stays server-side.
+`.env` is git-ignored. Every `VITE_*` variable is **bundled into the browser
+bundle and is visible to anyone using the app**. Never place a production secret
+(database credentials, Supabase service-role keys, the backend `API_AUTH_TOKEN`)
+in frontend configuration — all privileged access stays server-side.
 
-Setting `VITE_API_BASE_URL` to an empty string routes requests through the Vite
-dev proxy instead; see "CORS" below.
+`VITE_API_BASE_URL` controls how the browser reaches the backend:
+
+| Value | Mode | Notes |
+| --- | --- | --- |
+| `http://localhost:8000` (default) | Direct, cross-origin | Requires backend CORS (`CORS_ALLOW_ORIGINS`) |
+| empty string | Same-origin via the Vite dev proxy | Set it in `frontend/.env` (an empty *shell* var is treated as unset by Vite) |
+| `https://api.example.com` | Direct, production | Requires backend CORS for the site's origin |
+
+## Authentication
+
+`VITE_API_TOKEN` is an **optional shared bearer token**: when set (non-empty),
+every request carries `Authorization: Bearer <token>`; when unset, no header is
+sent (matching a backend running with authentication disabled outside
+production). It corresponds to the backend's `API_AUTH_TOKEN`.
+
+> **It is not a secure place for a production secret.** Anything bundled via
+> `VITE_*` ships to the browser, so a token placed here is readable by every
+> user and by anyone who inspects the bundle. Use `VITE_API_TOKEN` only for
+> local development against a backend whose token is not sensitive.
+
+For production, do **not** embed the shared backend token in the bundle. Secure
+options (each a separate, approved change; none is implemented here):
+
+1. **Backend proxy / BFF** — the browser calls a same-origin server that holds
+   the token server-side and forwards requests. Recommended.
+2. **Real user authentication** — an identity provider / session issued by the
+   backend, so the browser never carries a shared service secret.
+
+This phase does not add a login system or change API behaviour; the existing
+`VITE_API_TOKEN` mechanism is preserved for development.
 
 ## API layer
 
@@ -149,11 +179,11 @@ typed module plus native controls keep the dependency surface minimal.
 
 ## CORS (important)
 
-The backend does **not** currently send CORS headers. Verified locally: a
-request to `/api/v1/health` with `Origin: http://localhost:5173` returns no
-`Access-Control-Allow-Origin` header. Calling `http://localhost:8000` directly
-from the browser is therefore blocked, and the indicator shows **Backend
-unavailable** even though the backend is healthy.
+By default the backend sends **no** CORS headers, so a browser calling
+`http://localhost:8000` directly from the Vite origin (`http://localhost:5173`)
+is blocked and the indicator shows **Backend unavailable** even though the
+backend is healthy. Enable the dev proxy, or configure the backend's
+`CORS_ALLOW_ORIGINS`, to run locally:
 
 Two ways to run locally:
 
@@ -171,9 +201,17 @@ Two ways to run locally:
    responses. This is a development-only convenience and does not fix CORS for
    deployments.
 
-2. **Configure CORS on the backend** (a later, backend-side change). Until the
-   FastAPI app adds `CORSMiddleware` allowing the Vite origin, direct
-   cross-origin calls fail. This step does not modify the backend.
+2. **Configure CORS on the backend.** The backend now supports CORS for
+   **explicit** origins via `CORS_ALLOW_ORIGINS` (comma-separated; the wildcard
+   `*` is rejected). For example, to allow the Vite dev origin:
+
+   ```text
+   # backend .env
+   CORS_ALLOW_ORIGINS=http://localhost:5173
+   ```
+
+   Left empty, no CORS headers are sent, which is why the dev proxy (option 1)
+   exists. Credentials are never combined with a wildcard origin.
 
 ## Running the backend locally
 

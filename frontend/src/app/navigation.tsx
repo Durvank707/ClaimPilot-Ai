@@ -19,8 +19,8 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   {
     id: 'overview',
-    label: 'Overview',
-    description: 'Operational summary of claim activity and risk.',
+    label: 'Dashboard',
+    description: 'Operational summary of persisted analyses and reviews.',
     icon: OverviewIcon,
   },
   {

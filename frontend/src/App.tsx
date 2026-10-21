@@ -28,6 +28,9 @@ function App() {
   }, [])
 
   const openAnalysis = useCallback((analysisId: string) => {
+    // A dashboard "recent activity" row or a history row opens the saved
+    // analysis details inside Claims History, so switch to that destination.
+    setView('history')
     setSelectedAnalysisId(analysisId)
   }, [])
 
@@ -47,7 +50,9 @@ function App() {
       onNavigate={navigate}
       pageTitle={detailsOpen ? 'Saved Analysis' : active.label}
     >
-      {view === 'overview' ? <OverviewPage /> : null}
+      {view === 'overview' ? (
+        <OverviewPage onOpenAnalysis={openAnalysis} />
+      ) : null}
       {view === 'new-claim' ? <NewClaimPage /> : null}
       {view === 'history' ? (
         <ClaimsHistoryPage

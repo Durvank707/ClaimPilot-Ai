@@ -64,6 +64,41 @@ export function formatNumber(value: unknown, decimals = 2): string | null {
 }
 
 /**
+ * Human-friendly elapsed time since a stored analysis timestamp.
+ *
+ * Naive timestamps are treated as UTC, matching ``formatDate``. Returns null
+ * when the value is absent or unparseable so callers can render an honest
+ * placeholder. This describes how long an item has been waiting; it is not an
+ * SLA or a deadline.
+ */
+export function formatWaitingAge(
+  value: unknown,
+  now: Date = new Date(),
+): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  const hasTimeZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed)
+  const then = new Date(hasTimeZone ? trimmed : `${trimmed}Z`)
+  const thenMs = then.getTime()
+  if (Number.isNaN(thenMs)) return null
+
+  const diffMs = now.getTime() - thenMs
+  if (!Number.isFinite(diffMs) || diffMs < 0) return 'Less than an hour'
+
+  const minutes = Math.floor(diffMs / 60_000)
+  if (minutes < 60) return 'Less than an hour'
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`
+  const days = Math.floor(hours / 24)
+  if (days < 14) return `${days} ${days === 1 ? 'day' : 'days'}`
+  const weeks = Math.floor(days / 7)
+  if (days < 60) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'}`
+  const months = Math.floor(days / 30)
+  return `${months} ${months === 1 ? 'month' : 'months'}`
+}
+
+/**
  * Interpret the value as a score in [0,100] when possible. Returns null if the
  * value is not a finite number or is obviously out of a reasonable range.
  */
