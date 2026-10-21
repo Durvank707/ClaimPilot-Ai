@@ -277,3 +277,35 @@ def test_ml_analysis_failure_is_not_reported_as_success(sqlite_db, monkeypatch):
     assert response.status_code >= 500
     assert _count(Session, models.Claim) == 0
     assert _count(Session, models.ClaimAnalysis) == 0
+
+
+def test_commit_failure_rolls_back_and_reports_not_persisted(
+    client, sqlite_db, fake_analyze, monkeypatch, caplog
+):
+    """A failure at the commit boundary rolls back and never reports success.
+
+    The claim and analysis are flushed (real rows inside the open transaction)
+    and then ``commit`` fails; nothing may be left behind and the response must
+    report ``persisted=False`` with no ``analysis_id``.
+    """
+    from sqlalchemy.orm import Session as SASession
+
+    _, Session = sqlite_db
+
+    def failing_commit(self):
+        raise SQLAlchemyError("simulated commit failure")
+
+    monkeypatch.setattr(SASession, "commit", failing_commit)
+
+    with caplog.at_level(logging.ERROR, logger="backend.routers.claims"):
+        response = client.post(ANALYZE_URL, json={"policy_id": "POL-COMMITFAIL"})
+
+    assert response.status_code == 200
+    assert set(response.json().keys()) == RESPONSE_FIELDS
+    body = response.json()
+    assert body["persisted"] is False
+    assert body["analysis_id"] is None
+
+    # Nothing was committed: no orphan claim or analysis.
+    assert _count(Session, models.Claim) == 0
+    assert _count(Session, models.ClaimAnalysis) == 0

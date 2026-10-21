@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from alembic import context
 
-from backend.db.database import Base
+from backend.db.database import Base, DATABASE_URL
 from backend.db import models
 
 config = context.config
@@ -17,7 +17,18 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def get_url():
-    return os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url") or "sqlite:///claimpilot.db")
+    """The URL migrations run against.
+
+    Uses the application's resolved ``DATABASE_URL`` (already validated by
+    ``backend.db.database``: missing in production raises there). The explicit
+    ``-x``/config override is still honoured for advanced use.
+    """
+    return (
+        context.get_x_argument(as_dictionary=True).get("url")
+        or os.getenv("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url")
+        or DATABASE_URL
+    )
 
 def run_migrations_offline() -> None:
     url = get_url()
