@@ -29,3 +29,8 @@ frontend/dist/
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
+
+# Local database artifacts
+*.db
+*.sqlite
+*.sqlite3
